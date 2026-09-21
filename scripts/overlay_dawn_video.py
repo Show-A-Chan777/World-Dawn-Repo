@@ -17,6 +17,7 @@ Notion「World Dawn × Bible Verses 制作ルーティーン」の定型テン�
       5. ロケーション名(英語 / 国名)
       6. ブランド名「World Dawn」(ロケーション名のすぐ下)
   - 全要素フェードイン
+  - 動画終端は映像(音声があれば音声も)がフェードアウトして終わる
 
 Usage:
     python3 overlay_dawn_video.py \\
@@ -47,8 +48,9 @@ CJK_FONT_TTC = "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"
 FONT_REGULAR_FILE = "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"
 FONT_BOLD_FILE = "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc"
 
-FADE_START = 0.2
-FADE_DUR = 0.8
+FADE_START = 0.2  # text fade-in start (seconds into the clip)
+FADE_DUR = 0.8  # text fade-in duration
+FADE_OUT_DUR = 0.6  # whole-frame (and audio, if present) fade-to-black at the end
 
 
 def ffprobe_dimensions(path: str) -> tuple[int, int]:
@@ -62,6 +64,25 @@ def ffprobe_dimensions(path: str) -> tuple[int, int]:
     )
     info = json.loads(out.stdout)["streams"][0]
     return int(info["width"]), int(info["height"])
+
+
+def ffprobe_duration(path: str) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path],
+        check=True, capture_output=True, text=True,
+    )
+    return float(json.loads(out.stdout)["format"]["duration"])
+
+
+def has_audio_stream(path: str) -> bool:
+    out = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "a",
+            "-show_entries", "stream=index", "-of", "json", path,
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    return bool(json.loads(out.stdout).get("streams"))
 
 
 def _measure(font: ImageFont.FreeTypeFont, text: str) -> float:
@@ -196,15 +217,23 @@ def build_overlay(input_path, output_path, jp_verse, en_verse, jp_ref, en_ref, l
         f"drawbox=x=0:y=ih-{bottom_bar}:w=iw:h={bottom_bar}:color=black@1.0:t=fill",
     ]
 
-    vf = ",".join(letterbox + drawtext_filters)
+    # Whole-frame fade to black at the very end of the clip (applied after the
+    # letterbox/text so it fades everything together).
+    duration = ffprobe_duration(input_path)
+    fade_out_dur = min(FADE_OUT_DUR, duration / 2)
+    fade_out_start = max(0.0, duration - fade_out_dur)
+    fade_filter = [f"fade=t=out:st={fade_out_start:.3f}:d={fade_out_dur:.3f}"]
 
-    cmd = [
-        "ffmpeg", "-y", "-i", input_path,
-        "-vf", vf,
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "medium",
-        "-c:a", "copy",
-        output_path,
-    ]
+    vf = ",".join(letterbox + drawtext_filters + fade_filter)
+
+    cmd = ["ffmpeg", "-y", "-i", input_path, "-vf", vf]
+
+    if has_audio_stream(input_path):
+        cmd += ["-af", f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_dur:.3f}", "-c:a", "aac"]
+    else:
+        cmd += ["-an"]
+
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "medium", output_path]
     subprocess.run(cmd, check=True)
 
 
