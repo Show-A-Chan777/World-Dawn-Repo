@@ -15,7 +15,7 @@ Notion「World Dawn × Bible Verses 制作ルーティーン」の定型テン�
       3. 日本語聖書箇所(大きめ)
       4. 英語聖書箇所(大きめ・太字)
       5. ロケーション名(英語 / 国名)
-  - 最下部の黒帯内にブランド名「World Dawn」
+      6. ブランド名「World Dawn」(ロケーション名のすぐ下)
   - 全要素フェードイン
 
 Usage:
@@ -123,7 +123,7 @@ def build_overlay(input_path, output_path, jp_verse, en_verse, jp_ref, en_ref, l
     w, h = ffprobe_dimensions(input_path)
 
     top_bar = round(h * 0.09)
-    bottom_bar = round(h * 0.15)
+    bottom_bar = round(h * 0.10)
     max_w = w * 0.86
 
     # Nominal font sizes as a fraction of width, then auto-fit.
@@ -161,12 +161,14 @@ def build_overlay(input_path, output_path, jp_verse, en_verse, jp_ref, en_ref, l
         + [(jp_ref, jp_ref_size, FONT_BOLD_FILE)]
         + [(en_ref, en_ref_size, FONT_BOLD_FILE)]
         + [(location, loc_size, FONT_REGULAR_FILE)]
+        + [(brand, brand_size, FONT_BOLD_FILE)]
     )
     gap_after_group = {
         len(jp_verse_lines) - 1: round(jp_verse_size * 0.55),  # after verse block
         len(jp_verse_lines) + len(en_verse_lines) - 1: round(en_verse_size * 0.75),  # after en verse
         len(jp_verse_lines) + len(en_verse_lines): round(jp_ref_size * 0.35),  # after jp ref
         len(jp_verse_lines) + len(en_verse_lines) + 1: round(en_ref_size * 0.55),  # after en ref
+        len(jp_verse_lines) + len(en_verse_lines) + 2: round(loc_size * 0.45),  # after location
     }
 
     heights = [line_h(sz) for _, sz, _ in group_lines]
@@ -188,17 +190,6 @@ def build_overlay(input_path, output_path, jp_verse, en_verse, jp_ref, en_ref, l
             f"alpha='min(1,max(0,(t-{FADE_START})/{FADE_DUR}))'"
         )
         y += heights[idx] + gap_after_group.get(idx, 0)
-
-    # --- Brand, pinned inside the bottom letterbox bar ---
-    brand_file = Path(tmpdir) / "brand.txt"
-    brand_file.write_text(brand, encoding="utf-8")
-    brand_y = h - bottom_bar // 2 - line_h(brand_size) // 2
-    drawtext_filters.append(
-        f"drawtext=fontfile='{esc_path(FONT_BOLD_FILE)}':textfile='{esc_path(str(brand_file))}':"
-        f"fontsize={brand_size}:fontcolor=white:x=(w-text_w)/2:y={brand_y}:"
-        f"shadowcolor=black@0.85:shadowx=1:shadowy=1:"
-        f"alpha='min(1,max(0,(t-{FADE_START})/{FADE_DUR}))'"
-    )
 
     letterbox = [
         f"drawbox=x=0:y=0:w=iw:h={top_bar}:color=black@1.0:t=fill",
