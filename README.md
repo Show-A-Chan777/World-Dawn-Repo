@@ -1,2 +1,43 @@
 # World-Dawn-Repo
 世界の夜明けの動画を作成
+
+## テキストオーバーレイ (scripts/overlay_dawn_video.py)
+
+Notion「World Dawn × Bible Verses 制作ルーティーン」の定型テンプレート
+(参考画像: IMG_2805)に従い、Artlistで生成した夜明け動画に下記6要素の
+テキストを焼き込む ffmpeg ベースのツール。
+
+- 上下に黒帯(レターボックス)
+- 白文字・セリフ体(Noto Serif CJK JP)・影付き・フェードイン
+- 画面中央やや下寄りに、日本語聖句 → 英語聖句(NIV) → 日本語聖書箇所 →
+  英語聖書箇所 → ロケーション名の順で中央揃え配置
+- 最下部の黒帯内にブランド名「World Dawn」
+
+### 必要な環境
+
+```bash
+apt-get install -y ffmpeg fonts-noto-cjk
+pip install --break-system-packages pillow
+```
+
+### 使い方
+
+```bash
+python3 scripts/overlay_dawn_video.py \
+  --input source.mp4 --output final.mp4 \
+  --jp-verse "夜には泣きながら過ごしても、朝には喜びの歌がある" \
+  --en-verse "weeping may stay for the night, but rejoicing comes in the morning" \
+  --jp-ref "詩篇 30:5" --en-ref "Psalm 30:5" \
+  --location "Zhangjiajie / China"
+```
+
+`--brand` を省略すると既定値「World Dawn」が使われる。
+
+### 既知の制限
+
+このリポジトリを扱うClaude Code(World Dawn環境)のサンドボックスは、
+組織のネットワークポリシーにより `*.artlist.io` への直接アクセスが
+ブロックされている(`curl`で `CONNECT tunnel failed, response 403`)。
+そのため、Artlistが発行する動画URLからのダウンロードがこの環境では
+実行できない。動画ファイルを他の経路(手元のブラウザ等)で入手した上で、
+このスクリプトに `--input` として渡すこと。
