@@ -17,7 +17,10 @@ Notion「World Dawn × Bible Verses 制作ルーティーン」の定型テン�
       5. ロケーション名(英語 / 国名)
       6. ブランド名「World Dawn」(ロケーション名のすぐ下)
   - 全要素フェードイン
-  - 動画終端は映像(音声があれば音声も)がフェードアウトして終わる
+  - 動画終端は映像(音声・BGMがあればそれらも)がフェードアウトして終わる
+  - --bgm を渡すと、BGMをクリップの長さにループ/トリムし、環境音があれば
+    その下にミックスする(既定で環境音より音量を落とす)。BGMは冒頭で
+    フェードイン、終端で他の音声と一緒にフェードアウトする。
 
 Usage:
     python3 overlay_dawn_video.py \\
@@ -25,7 +28,8 @@ Usage:
         --jp-verse "夜には泣きながら過ごしても、朝には喜びの歌がある" \\
         --en-verse "weeping may stay for the night, but rejoicing comes in the morning" \\
         --jp-ref "詩篇 30:5" --en-ref "Psalm 30:5" \\
-        --location "Zhangjiajie / China"
+        --location "Zhangjiajie / China" \\
+        --bgm bgm/world_dawn_theme.mp3
 
 Requires: ffmpeg (with libfreetype/libfontconfig), Pillow, and the
 "Noto Serif CJK JP" font installed (fonts-noto-cjk).
@@ -140,7 +144,7 @@ def esc_path(p: str) -> str:
     return p.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
-def build_overlay(input_path, output_path, jp_verse, en_verse, jp_ref, en_ref, location, brand, tmpdir):
+def build_overlay(input_path, output_path, jp_verse, en_verse, jp_ref, en_ref, location, brand, tmpdir, bgm_path=None, bgm_volume=0.25):
     w, h = ffprobe_dimensions(input_path)
 
     top_bar = round(h * 0.09)
@@ -226,10 +230,48 @@ def build_overlay(input_path, output_path, jp_verse, en_verse, jp_ref, en_ref, l
 
     vf = ",".join(letterbox + drawtext_filters + fade_filter)
 
-    cmd = ["ffmpeg", "-y", "-i", input_path, "-vf", vf]
+    has_ambient = has_audio_stream(input_path)
+    fade_in_dur = min(1.0, duration / 4)
 
-    if has_audio_stream(input_path):
-        cmd += ["-af", f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_dur:.3f}", "-c:a", "aac"]
+    cmd = ["ffmpeg", "-y", "-i", input_path]
+    if bgm_path:
+        # Loop the BGM indefinitely; it gets trimmed to the clip's duration below.
+        cmd += ["-stream_loop", "-1", "-i", bgm_path]
+
+    filter_complex = [f"[0:v]{vf}[vout]"]
+
+    audio_out = None
+    if bgm_path:
+        filter_complex.append(
+            f"[1:a]atrim=0:{duration:.3f},asetpts=PTS-STARTPTS,"
+            f"volume={bgm_volume},"
+            f"afade=t=in:st=0:d={fade_in_dur:.3f},"
+            f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_dur:.3f}[bgm]"
+        )
+        if has_ambient:
+            filter_complex.append(
+                f"[0:a]afade=t=out:st={fade_out_start:.3f}:d={fade_out_dur:.3f}[amb]"
+            )
+            # `amix ... duration=first` has been observed to mis-estimate the
+            # mixed stream's length when run in the same graph as a video
+            # encode, so force an explicit trim to the known clip duration
+            # afterwards rather than trusting it.
+            filter_complex.append(
+                f"[amb][bgm]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
+                f"atrim=0:{duration:.3f},asetpts=PTS-STARTPTS[aout]"
+            )
+        else:
+            filter_complex.append(f"[bgm]atrim=0:{duration:.3f},asetpts=PTS-STARTPTS[aout]")
+        audio_out = "aout"
+    elif has_ambient:
+        filter_complex.append(
+            f"[0:a]afade=t=out:st={fade_out_start:.3f}:d={fade_out_dur:.3f}[aout]"
+        )
+        audio_out = "aout"
+
+    cmd += ["-filter_complex", ";".join(filter_complex), "-map", "[vout]"]
+    if audio_out:
+        cmd += ["-map", f"[{audio_out}]", "-c:a", "aac"]
     else:
         cmd += ["-an"]
 
@@ -247,13 +289,15 @@ def main():
     p.add_argument("--en-ref", required=True)
     p.add_argument("--location", required=True)
     p.add_argument("--brand", default="World Dawn")
+    p.add_argument("--bgm", help="Optional background music file, looped/trimmed to the clip's length and mixed under any ambient audio.")
+    p.add_argument("--bgm-volume", type=float, default=0.25, help="BGM volume multiplier relative to ambient audio (default 0.25).")
     args = p.parse_args()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         build_overlay(
             args.input, args.output,
             args.jp_verse, args.en_verse, args.jp_ref, args.en_ref, args.location, args.brand,
-            tmpdir,
+            tmpdir, bgm_path=args.bgm, bgm_volume=args.bgm_volume,
         )
     print(f"Wrote {args.output}")
 
